@@ -1,0 +1,66 @@
+global_defs {
+	router_id DB_CLUSTER_01
+}
+
+vrrp_script chk_psql_running {
+    script "/etc/keepalived/check-psql-running.sh 172.22.254.201"
+    interval 5
+    # rise 2 # number of successful runs before status becomes good
+    # fall 1 # number of unsuccessful runs before status becomes bad
+}
+
+vrrp_script chk_psql_dual_master {
+    script "/etc/keepalived/check-psql-dual-master.sh 172.22.254.201 172.22.254.202"
+    interval 5
+}
+
+vrrp_script chk_psql_local_master {
+    script "/etc/keepalived/check-psql-local-master.sh 172.22.254.201"
+    interval 5
+}
+
+vrrp_script chk_fs_rw {
+    script "/etc/keepalived/check-fs-rw.sh /var/lib/postgresql/9.1/main/sync >/dev/null 2>&1 && /etc/keepalived/check-fs-rw.sh /var/lib/postgresql/9.1/main >/dev/null 2>&1"
+    interval 10
+}
+
+vrrp_script chk_sys_parameters {
+    script "/etc/keepalived/check-sys-parameters.sh /etc/keepalived/check-sys-parameters.conf"
+    interval 10
+}
+
+vrrp_script chk_service_trigger {
+    script "/etc/keepalived/check-service-trigger.sh /etc/keepalived/service.trigger"
+    interval 1
+}
+
+vrrp_instance DB {
+    interface eth0
+    state BACKUP
+    virtual_router_id 51
+    priority 200
+#    nopreempt
+
+    authentication {
+        auth_type PASS
+        auth_pass armadadb123
+    }
+
+    virtual_ipaddress {
+        172.22.254.200/24
+    }
+#    track_interface {
+#       eth0
+#    }
+    track_script {
+        chk_psql_running weight 10
+        chk_psql_local_master weight 10
+        chk_psql_dual_master weight -40
+        chk_fs_rw weight -40
+        chk_sys_parameters weight -40
+        chk_service_trigger weight -60
+    }
+    notify_fault "/etc/init.d/postgresql stop"
+    notify_backup "/etc/keepalived/postgresql-restart.sh 9.1 main || /etc/keepalived/postgresql-become-slave.sh 9.1 main"
+    notify_master "/etc/keepalived/postgresql-restart.sh 9.1 main && /etc/keepalived/postgresql-become-master.sh 9.1 main"
+}
